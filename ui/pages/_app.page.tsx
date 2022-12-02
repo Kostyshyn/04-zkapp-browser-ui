@@ -8,6 +8,8 @@ import {
   Field,
 } from 'snarkyjs'
 
+const ZK_APP_PUBKEY = 'B62qk81ZpQEZogyubNNSK4NaUfTGo3hxN7VqrjFToHDGGjzpsx5DUGf';
+
 export interface InitialState {
   zkappWorkerClient: null | ZkappWorkerClient;
   hasWallet: null | boolean;
@@ -60,7 +62,7 @@ export default function App() {
         console.log('compiling zkApp');
         await zkappWorkerClient.compileContract();
         console.log('zkApp compiled');
-        const zkappPublicKey = PublicKey.fromBase58('B62qrBBEARoG78KLD1bmYZeEirUfpNXoMPYQboTwqmGLtfqAGLXdWpU');
+        const zkappPublicKey = PublicKey.fromBase58(ZK_APP_PUBKEY);
         await zkappWorkerClient.initZkappInstance(zkappPublicKey);
         console.log('getting zkApp state...');
         await zkappWorkerClient.fetchAccount({ publicKey: zkappPublicKey })
@@ -101,6 +103,71 @@ export default function App() {
   }, [state.hasBeenSetup]);
   // -------------------------------------------------------
 
+  // Send a transaction
+  const onSendTransaction = async () => {
+    setState({ ...state, creatingTransaction: true });
+    console.log('sending a transaction...');
+    await state.zkappWorkerClient!.fetchAccount({ publicKey: state.publicKey! });
+    await state.zkappWorkerClient!.createUpdateTransaction();
+    console.log('creating proof...');
+    await state.zkappWorkerClient!.proveUpdateTransaction();
+    console.log('getting Transaction JSON...');
+    const transactionJSON = await state.zkappWorkerClient!.getTransactionJSON()
+    console.log('requesting send transaction...');
+    const { hash } = await (window as any).mina.sendTransaction({
+      transaction: transactionJSON,
+      feePayer: {
+        fee: transactionFee,
+        memo: ''
+      },
+    });
+    console.log(
+      'See transaction at https://berkeley.minaexplorer.com/transaction/' + hash
+    );
+    setState({ ...state, creatingTransaction: false });
+  }
+  // -------------------------------------------------------
 
-  return <div>Test</div>
+  // Refresh the current state
+  const onRefreshCurrentNum = async () => {
+    console.log('getting zkApp state...');
+    await state.zkappWorkerClient!.fetchAccount({ publicKey: state.zkappPublicKey! })
+    const currentNum = await state.zkappWorkerClient!.getNum();
+    console.log('current state:', currentNum.toString());
+    setState({ ...state, currentNum });
+  }
+  // -------------------------------------------------------
+
+
+  // -------------------------------------------------------
+  // Create UI elements
+  let hasWallet;
+  if (state.hasWallet != null && !state.hasWallet) {
+    const auroLink = 'https://www.aurowallet.com/';
+    const auroLinkElem = <a href={auroLink} target="_blank" rel="noreferrer"> [Link] </a>
+    hasWallet = <div> Could not find a wallet. Install Auro wallet here: {auroLinkElem}</div>
+  }
+  let setupText = state.hasBeenSetup ? 'SnarkyJS Ready' : 'Setting up SnarkyJS...';
+  let setup = <div> {setupText} {hasWallet}</div>
+  let accountDoesNotExist;
+  if (state.hasBeenSetup && !state.accountExists) {
+    const faucetLink = 'https://faucet.minaprotocol.com/?address=' + state.publicKey!.toBase58();
+    accountDoesNotExist = <div>
+      Account does not exist. Please visit the faucet to fund this account
+      <a href={faucetLink} target="_blank" rel="noreferrer"> [Link] </a>
+    </div>
+  }
+  let mainContent;
+  if (state.hasBeenSetup && state.accountExists) {
+    mainContent = <div>
+      <button onClick={onSendTransaction} disabled={state.creatingTransaction}> Send Transaction</button>
+      <div> Current Number in zkApp: {state.currentNum!.toString()} </div>
+      <button onClick={onRefreshCurrentNum}> Get Latest State</button>
+    </div>
+  }
+  return <div>
+    {setup}
+    {accountDoesNotExist}
+    {mainContent}
+  </div>
 }
